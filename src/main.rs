@@ -1,7 +1,7 @@
 use std::{
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
-    process,
+    {process, fs},
 };
 
 fn main() {
@@ -42,5 +42,17 @@ fn handle_connection(mut stream: TcpStream) {
         // Collect the lines into a vector
         .collect();
 
-    println!("Request: {:#?}", http_request);
+    // Status line part of a response that uses HTTP version 1.1, has a status 
+    // code of 200, and an OK reason phrase, no headers, and no body
+    let status_line = "HTTP/1.1 200 OK";
+    // Read the HTML document into a String
+    let contents = fs::read_to_string("hello.html").unwrap();
+    let length = contents.len();
+
+    let response = 
+        // Format the files contents as the body of the success response
+        format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+
+    // Send the response data as bytes directly down the connection.
+    stream.write_all(response.as_bytes()).unwrap();
 }
