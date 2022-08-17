@@ -32,32 +32,23 @@ fn handle_connection(mut stream: TcpStream) {
     // Read the first line of the HTTP request
     let request_line = buf_reader.lines().next().unwrap().unwrap();
 
-    // Check if the request line to see if it is a GET request to the path /,
-    // if it is we will return the contents of our HTML file.
-    if request_line == "GET / HTTP/1.1" {
+    // Check if the request
+    let (status_line, filename) = if request_line == "GET / HTTP/1.1" {
         // Status line part of a response that uses HTTP version 1.1, has a status 
         // code of 200, and an OK reason phrase, no headers, and no body
-        let status_line = "HTTP/1.1 200 OK";
-        // Read the HTML document into a String
-        let contents = fs::read_to_string("hello.html").unwrap();
-        let length = contents.len();
+        ("HTTP/1.1 200 OK", "hello.html")
+    } else {
+        ("HTTP/1.1 404 NOT FOUND", "404.html")
+    };
 
-        // Format the files contents as the body of the success response
-        let response = format!(
-            "{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}"
-        );
+    // Read the HTML document into a String
+    let contents = fs::read_to_string(filename).unwrap();
+    let length = contents.len();
     
-        // Send the response data as bytes directly down the connection.
-        stream.write_all(response.as_bytes()).unwrap();
-    } else { 
-        let status_line = "HTTP/1.1 404 NOT FOUND";
-        let contents = fs::read_to_string("404.html").unwrap();
-        let length = contents.len();
-
-        let response = format!(
-            "{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}"
-        );
-
-        stream.write_all(response.as_bytes()).unwrap();
-    }
+    // Format the files contents as the body of the success response
+    let response = format!(
+        "{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}"
+    );
+    stream.write_all(response.as_bytes()).unwrap();
+    // Send the response data as bytes directly down the connection.
 }
