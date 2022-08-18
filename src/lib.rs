@@ -1,18 +1,18 @@
 use std::{
     process,
-    thread::{Builder, JoinHandle}, 
+    thread::{self, Builder}, 
     sync::{mpsc, Arc, Mutex},
 };
 
 #[derive(Debug)]
 pub enum PoolCreationError {
-    ZeroThreads(&'static str)
+    ZeroThreads,
 }
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
     /// Functions as the queue of jobs
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 /// Type alias for a trait object that holds the type of closure execute recives
@@ -30,9 +30,7 @@ impl ThreadPool {
         // Return error if the pool was attempted to be created with no threads
         if size == 0 { 
             return Err(
-                PoolCreationError::ZeroThreads(
-                    "Attempted to create a pool with zero threads"
-                )
+                PoolCreationError::ZeroThreads
             ) 
         }
 
@@ -57,7 +55,7 @@ impl ThreadPool {
 
         // All the workers have now been created and are waiting for jobs
 
-        Ok(ThreadPool { workers, sender })
+        Ok(ThreadPool { workers, sender: Some(sender) })
     }
 
     /// Sends the job you want to execute through the sender
@@ -76,35 +74,63 @@ impl ThreadPool {
 
         // Send the job down the channel where it will then be recived and
         // executed by one of the workers (threads)
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        // Explicitly drop sender, this will close the channel, which indicates
+        // no more messages will be sent.
+        drop(self.sender.take());
+
+        for worker in &mut self.workers {
+            println!("Shutting down worker {}", worker.id);
+
+            // Call take on the Option value holding the JoinHandle to move 
+            // thread out of worker.
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
 
 struct Worker {
     id: usize,
-    thread: JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
     fn new(id: usize, recieiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         let builder = Builder::new();
         let thread = match builder.spawn(move || loop {
-            let job = recieiver
-                                        // Block the current thread until we can 
-                                        // aquire the mutex this mutex is so we
-                                        // can access the receiver (this is behind
-                                        // a mutex since channels can only have a
-                                        // single consumer)
-                                        .lock().unwrap()
-                                        // Wait to receive a job from the channel
-                                        // Jobs are sent down the channel from 
-                                        // ThreadPool::execute
-                                        .recv().unwrap();
-
-            println!("Worker {id} got a job; executing");
-
-            // Execute the job closure "extracted" above
-            job();
+            match recieiver
+                // Block the current thread until we can 
+                // aquire the mutex this mutex is so we
+                // can access the receiver (this is behind
+                // a mutex since channels can only have a
+                // single consumer)
+                .lock().unwrap()
+                // Wait to receive a job from the channel
+                // Jobs are sent down the channel from 
+                // ThreadPool::execute
+                .recv() { // Channel is still running (got job)
+                    Ok(job) => {
+                        println!(
+                            "Worker {id} got a job; executing"
+                        );
+                        // Execute the job closure "extracted" 
+                        // above.
+                        job();
+                    },
+                    Err(_) => { // Channel was shut down
+                        println!(
+                            "Worker {id} dissconnected; shutting down"
+                        );
+                        break;
+                    }
+            }
         }) {
             Ok(t) => t,
             Err(e) => {
@@ -115,7 +141,7 @@ impl Worker {
 
         Worker {
             id,
-            thread,
+            thread: Some(thread),
         }
     }
 }
