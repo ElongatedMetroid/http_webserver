@@ -5,20 +5,56 @@ use std::{
     time::Duration,
 };
 
-use http_webserver::ThreadPool;
+use colored::Colorize;
+
+mod threadpool;
+mod config;
+
+use threadpool::{ThreadPool, PoolCreationError};
+use config::{Config};
 
 fn main() {
-    // Create a new TcpListener, the bind method will return a new TcpListener 
-    // instance that will be bound to the port 7878
-    let listener = match TcpListener::bind("127.0.0.1:7878") {
-        Ok(v) => v,
+    let config = match Config::new("Config.toml") {
+        Ok(c) => c,
+
         Err(e) => {
-            println!("Port could not be bound: {e}");
-            process::exit(1);
+            eprintln!("{}", format!("Configuration file had an error: {e}, Attempting to fall back on `Default.toml`").red());
+            
+            match Config::new("Default.toml") {
+                Ok(c) => {
+                    eprintln!("{}", "Successfully fell back on `Default.toml`".green());
+                    c
+                },
+                Err(e) => {
+                    eprintln!("{}", format!("Fallback config `Default.toml` failed: {e}, Exiting").red());
+                    process::exit(1);
+                }
+            }
         }
     };
 
-    let pool = ThreadPool::build(10).unwrap();
+    // Create a new TcpListener, the bind method will return a new TcpListener 
+    // instance that will be bound to the port 7878
+    let listener = TcpListener::bind(config.ip()).unwrap_or_else(|err| {
+        eprintln!("Could not bind port: {err}");
+        process::exit(1);
+    });
+
+    let pool = match ThreadPool::build(config.thread_count()) {
+        Ok(p) => p,
+        Err(e) => {
+            match e {
+                PoolCreationError::ZeroThreads => {
+                    eprintln!(
+                        "{}", 
+                        "***** Attempted to create a thread pool with 0 threads. Upping thread count to 1 *****".red()
+                    );
+
+                    ThreadPool::build(1).unwrap()
+                }
+            }
+        }
+    };
 
     // Iterate through each each stream between the client and the server, this
     // could also be seen as iterating between each connection attempt.
@@ -31,19 +67,25 @@ fn main() {
     }
 }
 
-/// Read data from the TCP stream and print it.
+/// Parse HTTP request and send back a response
 fn handle_connection(mut stream: TcpStream) {
     // Create a new BufRead instance that wraps a mutable reference to the stream
     let buf_reader = BufReader::new(&mut stream);
     // Read the first line of the HTTP request
     let request_line = buf_reader.lines().next().unwrap().unwrap();
+    
+    let (request_file, _) = request_line.split_at(request_line.len() - 8);
+
+    println!("{}", request_file);
+
+
 
     // Check if the request
     let (status_line, filename) = match &request_line[..] {
         "GET / HTTP/1.1" => {
             // Status line part of a response that uses HTTP version 1.1, has a 
             // status code of 200, and an OK reason phrase, no headers, and no body
-            ("HTTP/1.1 200 OK", "hello.html")
+            ("HTTP/1.1 200 OK", "index.html")
         }
         "GET /sleep HTTP/1.1" => {
             thread::sleep(Duration::from_secs(5));
