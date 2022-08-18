@@ -18,7 +18,7 @@ fn main() {
         }
     };
 
-    let pool = ThreadPool::build(12).unwrap();
+    let pool = ThreadPool::build(10).unwrap();
 
     // Iterate through each each stream between the client and the server, this
     // could also be seen as iterating between each connection attempt.
