@@ -10,7 +10,7 @@ use colored::Colorize;
 mod threadpool;
 mod config;
 
-use threadpool::{ThreadPool, PoolCreationError};
+use threadpool::{ThreadPool, ZeroThreads};
 use config::{Config};
 
 fn main() {
@@ -43,16 +43,14 @@ fn main() {
     let pool = match ThreadPool::build(config.thread_count()) {
         Ok(p) => p,
         Err(e) => {
-            match e {
-                PoolCreationError::ZeroThreads => {
-                    eprintln!(
-                        "{}", 
-                        "***** Attempted to create a thread pool with 0 threads. Upping thread count to 1 *****".red()
-                    );
+            eprintln!("{e}");
 
-                    ThreadPool::build(1).unwrap()
-                }
-            }
+            eprintln!(
+                "{}", 
+                "***** Attempted to create a thread pool with 0 threads. Upping thread count to 1 *****".red()
+            );
+
+            ThreadPool::build(1).unwrap()
         }
     };
 
@@ -73,12 +71,6 @@ fn handle_connection(mut stream: TcpStream) {
     let buf_reader = BufReader::new(&mut stream);
     // Read the first line of the HTTP request
     let request_line = buf_reader.lines().next().unwrap().unwrap();
-    
-    let (request_file, _) = request_line.split_at(request_line.len() - 8);
-
-    println!("{}", request_file);
-
-
 
     // Check if the request
     let (status_line, filename) = match &request_line[..] {
@@ -89,7 +81,7 @@ fn handle_connection(mut stream: TcpStream) {
         }
         "GET /sleep HTTP/1.1" => {
             thread::sleep(Duration::from_secs(5));
-            ("HTTP/1.1 200 OK", "hello.html")
+            ("HTTP/1.1 200 OK", "index.html")
         }
         _ => ("HTTP/1.1 404 NOT FOUND", "404.html")
     };

@@ -1,13 +1,20 @@
 use std::{
-    process,
     thread::{self, Builder}, 
     sync::{mpsc, Arc, Mutex},
+    error::Error,
+    fmt,
 };
 
 #[derive(Debug)]
-pub enum PoolCreationError {
-    ZeroThreads,
+pub struct ZeroThreads;
+
+impl fmt::Display for ZeroThreads {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Attempted to create threadpool with 0 threads provided")
+    }
 }
+
+impl Error for ZeroThreads {}
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -26,11 +33,11 @@ impl ThreadPool {
     /// # Returns
     /// On success this will return a new instance of a ThreadPool.
     /// On error this will return a PoolCreationError.
-    pub fn build(size: usize) -> Result<ThreadPool, PoolCreationError> {
+    pub fn build(size: usize) -> Result<ThreadPool, Box<dyn std::error::Error>> {
         // Return error if the pool was attempted to be created with no threads
         if size == 0 { 
             return Err(
-                PoolCreationError::ZeroThreads
+                Box::new(ZeroThreads)
             ) 
         }
 
@@ -50,7 +57,7 @@ impl ThreadPool {
             // thread::spawn cannot be used here since it expects to get some 
             // code that the thread should run immediately. But we just want to
             // create threads and have them wait until we create code later.
-            workers.push(Worker::new(i, Arc::clone(&receiver)));
+            workers.push(Worker::new(i, Arc::clone(&receiver))?);
         }
 
         // All the workers have now been created and are waiting for jobs
@@ -102,9 +109,9 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(id: usize, recieiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+    fn new(id: usize, recieiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Result<Worker, Box<dyn std::error::Error>> {
         let builder = Builder::new();
-        let thread = match builder.spawn(move || loop {
+        let thread = builder.spawn(move || loop {
             match recieiver
                 // Block the current thread until we can 
                 // aquire the mutex this mutex is so we
@@ -131,17 +138,11 @@ impl Worker {
                         break;
                     }
             }
-        }) {
-            Ok(t) => t,
-            Err(e) => {
-                println!("Failed to create worker {}: {}", id, e);
-                process::exit(1);
-            }
-        };
+        })?;
 
-        Worker {
+        Ok(Worker {
             id,
             thread: Some(thread),
-        }
+        })
     }
 }
