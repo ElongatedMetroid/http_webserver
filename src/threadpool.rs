@@ -16,6 +16,7 @@ impl fmt::Display for ZeroThreads {
 
 impl Error for ZeroThreads {}
 
+#[derive(Debug)]
 pub struct ThreadPool {
     workers: Vec<Worker>,
     /// Functions as the queue of jobs
@@ -103,6 +104,7 @@ impl Drop for ThreadPool {
     }
 }
 
+#[derive(Debug)]
 struct Worker {
     id: usize,
     thread: Option<thread::JoinHandle<()>>,
@@ -112,7 +114,7 @@ impl Worker {
     fn new(id: usize, recieiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Result<Worker, Box<dyn std::error::Error>> {
         let builder = Builder::new();
         let thread = builder.spawn(move || loop {
-            match recieiver
+            let message = recieiver
                 // Block the current thread until we can 
                 // aquire the mutex this mutex is so we
                 // can access the receiver (this is behind
@@ -122,21 +124,25 @@ impl Worker {
                 // Wait to receive a job from the channel
                 // Jobs are sent down the channel from 
                 // ThreadPool::execute
-                .recv() { // Channel is still running (got job)
-                    Ok(job) => {
-                        println!(
-                            "Worker {id} got a job; executing"
-                        );
-                        // Execute the job closure "extracted" 
-                        // above.
-                        job();
-                    },
-                    Err(_) => { // Channel was shut down
-                        println!(
-                            "Worker {id} dissconnected; shutting down"
-                        );
-                        break;
-                    }
+                .recv();
+                
+            match message { 
+                // Channel is still running (got job)
+                Ok(job) => {
+                    println!(
+                        "Worker {id} got a job; executing"
+                    );
+                    // Execute the job closure "extracted" 
+                    // above.
+                    job();
+                },
+                // Channel was shut down
+                Err(_) => { 
+                    println!(
+                        "Worker {id} dissconnected; shutting down"
+                    );
+                    break;
+                }
             }
         })?;
 
