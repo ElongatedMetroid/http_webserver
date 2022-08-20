@@ -1,17 +1,20 @@
+#![feature(is_some_with)]
+
 use std::{
-    io::{prelude::*, BufReader},
+    io::prelude::*,
     net::{TcpListener, TcpStream},
-    {process, fs, thread},
-    time::Duration,
+    {process, fs},
 };
 
 use colored::Colorize;
 
 mod threadpool;
 mod config;
+mod http;
 
 use threadpool::{ThreadPool, ZeroThreads};
-use config::{Config};
+use config::Config;
+use http::{Request};
 
 fn main() {
     let config = match Config::new("Config.toml") {
@@ -67,34 +70,23 @@ fn main() {
 
 /// Parse HTTP request and send back a response
 fn handle_connection(mut stream: TcpStream) {
-    // Create a new BufRead instance that wraps a mutable reference to the stream
-    let buf_reader = BufReader::new(&mut stream);
-    // Read the first line of the HTTP request
-    let request_line = buf_reader.lines().next().unwrap().unwrap();
+    let request = Request::parse(&mut stream);
 
-    // Check if the request
-    let (status_line, filename) = match &request_line[..] {
-        "GET / HTTP/1.1" => {
-            // Status line part of a response that uses HTTP version 1.1, has a 
-            // status code of 200, and an OK reason phrase, no headers, and no body
-            ("HTTP/1.1 200 OK", "index.html")
-        }
-        "GET /sleep HTTP/1.1" => {
-            thread::sleep(Duration::from_secs(5));
-            ("HTTP/1.1 200 OK", "index.html")
-        }
-        _ => ("HTTP/1.1 404 NOT FOUND", "404.html")
-    };
+    // TEMP EMPTY REQUEST CHECK
+    if request.file().is_none() {
+        return;
+    }
 
     // Read the HTML document into a String
-    let contents = fs::read_to_string(filename).unwrap();
+    let contents = fs::read_to_string(request.file().as_ref().unwrap()).unwrap();
     let length = contents.len();
     
     // Format the files contents as the body of the success response
     let response = format!(
-        "{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}"
+        "HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\n{contents}"
     );
 
     // Send the response data as bytes directly down the connection.
     stream.write_all(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
 }
